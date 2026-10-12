@@ -63,9 +63,13 @@ function toSnapshot(ad, cat) {
 
 export default {
   name: 'olx',
-  // OLX answered 403 to a second page ~4 s after the first (2026-10-13):
-  // give it a much slower pace. If it still blocks, the worker backs off.
-  minDelayMs: 15000,
+  // OLX served page 1 fine but answered 403 to the next request ~4 s later
+  // (2026-10-13) — a rate limit, not a ban. Trickle mode: one request every
+  // ~5 min and only the newest page per category (6 categories ≈ one pass
+  // per 30 min, inside the 45-min cycle). If it still 403s at this pace it's
+  // a real "no": the worker backs off 6 h → 24 h and the extension covers OLX.
+  minDelayMs: 5 * 60 * 1000,
+  maxPagesCap: 1,
   async discover({ maxPages = 5, delayMs, known, log }) {
     const out = [];
     for (const cat of CATEGORIES) {

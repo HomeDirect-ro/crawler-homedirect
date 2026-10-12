@@ -8,7 +8,8 @@
   "scripts": {
     "start": "node --env-file=.env src/worker.js",
     "once": "node --env-file-if-exists=.env src/worker.js --once",
-    "dry-run": "node src/worker.js --once --dry-run"
+    "dry-run": "node src/worker.js --once --dry-run",
+    "storia-once": "node --env-file=.env src/worker.js --once --source=storia"
   },
   "engines": {
     "node": ">=22"

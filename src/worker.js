@@ -28,7 +28,10 @@ const SOURCES = { olx, storia, publi24, imobiliare };
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function parseArgs(argv) {
-  const a = { sources: Object.keys(SOURCES), pages: 5, limit: 60, delay: DEFAULT_DELAY_MS, out: path.join(__dirname, '..', 'output'), once: false, dryRun: false, backfill: false, recheck: true };
+  // CRAWLER_SOURCES in .env (e.g. "publi24") picks the portals for this host;
+  // --source= on the command line overrides it.
+  const envSources = (process.env.CRAWLER_SOURCES || '').split(',').map((s) => s.trim()).filter((s) => SOURCES[s]);
+  const a = { sources: envSources.length ? envSources : Object.keys(SOURCES), pages: 5, limit: 60, delay: DEFAULT_DELAY_MS, out: path.join(__dirname, '..', 'output'), once: false, dryRun: false, backfill: false, recheck: true };
   for (const raw of argv) {
     const [k, v] = raw.replace(/^--/, '').split(/=(.*)/s);
     if (k === 'source') a.sources = v.split(',').filter((s) => SOURCES[s]);
@@ -69,7 +72,8 @@ async function runSource(name, args, state, stateFile, seen, known) {
   }
   try {
     const delayMs = Math.max(args.delay, SOURCES[name].minDelayMs || 0);
-    const found = await SOURCES[name].discover({ maxPages: args.pages, limit: args.limit, delayMs, seen, known, log });
+    const maxPages = Math.min(args.pages, SOURCES[name].maxPagesCap || Infinity);
+    const found = await SOURCES[name].discover({ maxPages, limit: args.limit, delayMs, seen, known, log });
     const r = await ingest(found, { dryRun: args.dryRun, outDir: args.out, log });
     log(`${name}: ${found.length} private listings → created ${r.created ?? 0}, updated ${r.updated ?? 0}${r.dryRun ? ' (dry run)' : ''}`);
     if (args.recheck && !args.dryRun && !args.backfill) await recheckSource(SOURCES[name], { delayMs, log });
@@ -78,7 +82,11 @@ async function runSource(name, args, state, stateFile, seen, known) {
     s.blockedUntil = null;
   } catch (err) {
     if (err instanceof BlockedError) {
-      s.backoffMs = Math.min(s.backoffMs ? s.backoffMs * 2 : BACKOFF_FIRST_MS, BACKOFF_MAX_MS);
+      // Never worked from this machine and refused straight away = the portal
+      // blocks this host (e.g. cloud IP ranges): go straight to the long pause.
+      s.backoffMs = !s.lastOkAt
+        ? BACKOFF_MAX_MS
+        : Math.min(s.backoffMs ? s.backoffMs * 2 : BACKOFF_FIRST_MS, BACKOFF_MAX_MS);
       s.blockedUntil = Date.now() + s.backoffMs;
       s.lastBlock = { at: new Date().toISOString(), message: err.message };
       log(`${name}: BLOCKED — ${err.message}. Pausing ${Math.round(s.backoffMs / 3600000)} h.`);
