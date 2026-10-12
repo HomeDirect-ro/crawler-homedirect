@@ -1,0 +1,16 @@
+{
+  "name": "crawler-homedirect",
+  "version": "2.0.0",
+  "description": "Discovery worker for HomeDirect's private-owner listings feed (OLX, Storia, Publi24, Imobiliare) — robots.txt-compliant, ingests into the HomeDirect API",
+  "type": "module",
+  "private": true,
+  "main": "src/worker.js",
+  "scripts": {
+    "start": "node --env-file=.env src/worker.js",
+    "once": "node --env-file-if-exists=.env src/worker.js --once",
+    "dry-run": "node src/worker.js --once --dry-run"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
