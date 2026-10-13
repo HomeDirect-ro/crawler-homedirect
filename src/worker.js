@@ -23,6 +23,9 @@ import imobiliare from './sources/imobiliare.js';
 //   flags: --source=a,b  --pages=N (max pages per category; stops earlier at
 //          the first page with nothing new)  --limit=N (imobiliare ads/run)
 //          --delay=ms  --out=dir  --once  --dry-run  --backfill  --no-recheck
+//          --refresh (re-read --pages pages even when nothing is new, so ads
+//          already saved get re-sent — e.g. after a parser fix; slow like backfill)
+//   node --env-file=.env src/worker.js --once --refresh --source=publi24 --pages=15
 
 const SOURCES = { olx, storia, publi24, imobiliare };
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,7 +34,7 @@ function parseArgs(argv) {
   // CRAWLER_SOURCES in .env (e.g. "publi24") picks the portals for this host;
   // --source= on the command line overrides it.
   const envSources = (process.env.CRAWLER_SOURCES || '').split(',').map((s) => s.trim()).filter((s) => SOURCES[s]);
-  const a = { sources: envSources.length ? envSources : Object.keys(SOURCES), pages: 5, limit: 60, delay: DEFAULT_DELAY_MS, out: path.join(__dirname, '..', 'output'), once: false, dryRun: false, backfill: false, recheck: true };
+  const a = { sources: envSources.length ? envSources : Object.keys(SOURCES), pages: 5, limit: 60, delay: DEFAULT_DELAY_MS, out: path.join(__dirname, '..', 'output'), once: false, dryRun: false, backfill: false, refresh: false, recheck: true };
   for (const raw of argv) {
     const [k, v] = raw.replace(/^--/, '').split(/=(.*)/s);
     if (k === 'source') a.sources = v.split(',').filter((s) => SOURCES[s]);
@@ -43,8 +46,10 @@ function parseArgs(argv) {
     else if (k === 'dry-run') a.dryRun = true;
     else if (k === 'no-recheck') a.recheck = false;
     else if (k === 'backfill') a.backfill = true;
+    else if (k === 'refresh') a.refresh = true;
   }
   // Backfill: go deep once, but twice as slow as normal runs.
+  if (a.refresh) a.delay = Math.max(a.delay, 8000);
   if (a.backfill) {
     if (!argv.some((x) => x.startsWith('--pages'))) a.pages = 40;
     a.delay = Math.max(a.delay, 8000);
@@ -73,10 +78,13 @@ async function runSource(name, args, state, stateFile, seen, known) {
   try {
     const delayMs = Math.max(args.delay, SOURCES[name].minDelayMs || 0);
     const maxPages = Math.min(args.pages, SOURCES[name].maxPagesCap || Infinity);
-    const found = await SOURCES[name].discover({ maxPages, limit: args.limit, delayMs, seen, known, log });
+    // --refresh: report every id as new so paging doesn't stop at known ads
+    // (ids are still recorded, so normal runs afterwards stay incremental).
+    const knownView = args.refresh ? { has: () => false, add: (src, id) => known.add(src, id), get size() { return known.size; } } : known;
+    const found = await SOURCES[name].discover({ maxPages, limit: args.limit, delayMs, seen, known: knownView, log });
     const r = await ingest(found, { dryRun: args.dryRun, outDir: args.out, log });
     log(`${name}: ${found.length} private listings → created ${r.created ?? 0}, updated ${r.updated ?? 0}${r.dryRun ? ' (dry run)' : ''}`);
-    if (args.recheck && !args.dryRun && !args.backfill) await recheckSource(SOURCES[name], { delayMs, log });
+    if (args.recheck && !args.dryRun && !args.backfill && !args.refresh) await recheckSource(SOURCES[name], { delayMs, log });
     s.lastOkAt = new Date().toISOString();
     s.backoffMs = 0;
     s.blockedUntil = null;
@@ -107,7 +115,7 @@ async function main() {
   const state = await loadState(stateFile);
   const seen = await SeenCache.load(path.join(args.out, 'seen.json'));
   const known = await KnownIds.load(path.join(args.out, 'known.json'));
-  console.log(`[${stamp()}] sources: ${args.sources.join(', ')} | up to ${args.pages} pages | delay ~${args.delay} ms | ${args.dryRun ? 'DRY RUN' : 'ingest → API'}${args.once ? ' | once' : ''}${args.backfill ? ' | BACKFILL' : ''} | known ids: ${known.size}`);
+  console.log(`[${stamp()}] sources: ${args.sources.join(', ')} | up to ${args.pages} pages | delay ~${args.delay} ms | ${args.dryRun ? 'DRY RUN' : 'ingest → API'}${args.once ? ' | once' : ''}${args.backfill ? ' | BACKFILL' : ''}${args.refresh ? ' | REFRESH' : ''} | known ids: ${known.size}`);
 
   await Promise.all(args.sources.map(async (name, i) => {
     await sleep(i * 5000); // stagger the first runs

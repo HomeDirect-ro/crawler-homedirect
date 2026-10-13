@@ -21,7 +21,12 @@ export function deriveExternalId(url) {
 export function propertyTypeFrom(text) {
   const s = String(text || '').toLowerCase();
   if (/garsonier|apartament|\bflat\b|studio/.test(s)) return 'apartment';
-  if (/\bcas[aăe]\b|case-|vil[aă]|house|duplex/.test(s)) return 'house';
+  // A "terenuri" category path is land even when the ad slug says
+  // "teren-ptr-casa"; "vila" only as a whole word ("teren-extraVILAn").
+  // (?<!\p{L}) / (?!\p{L}): word boundaries that know Romanian letters —
+  // plain \b treats "ă" as a non-word char, so /cas[aă]\b/ never matched "casă".
+  if (/(?<!\p{L})terenuri(?!\p{L})/u.test(s)) return 'land';
+  if (/(?<!\p{L})(?:cas[aăe]|vil[aăe])(?!\p{L})|case-|house|duplex/u.test(s)) return 'house';
   if (/teren|terrain|\bplot\b|land/.test(s)) return 'land';
   if (/birou|office/.test(s)) return 'office';
   if (/spa[tț]i[ui]?.?comercial|comercial|commercial/.test(s)) return 'commercial';
