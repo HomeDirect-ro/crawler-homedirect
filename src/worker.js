@@ -105,7 +105,7 @@ async function runSource(name, args, state, stateFile, seen, known) {
   } finally {
     await saveState(stateFile, state);
     await seen.save();
-    await known.save();
+    if (!args.dryRun) await known.save(); // a dry run must not hide ads from the next real run
   }
 }
 

@@ -1,6 +1,6 @@
 import { fetchPage } from '../http.js';
 import { deriveExternalId, propertyTypeFrom, roomsFrom, decodeEntities, clip } from '../listing.js';
-import { looksLikeOwner } from '../ownerSignals.js';
+import { looksLikeAgency } from '../ownerSignals.js';
 import { pageUntilKnown } from '../known.js';
 
 // Publi24 — real-estate category pages. Each embeds a schema.org ItemList
@@ -12,10 +12,11 @@ import { pageUntilKnown } from '../known.js';
 // allows /anunturi/<category>/ for "*" (only "/anunturi/?" queries, /rss/,
 // /DetailAd/ etc. are disallowed).
 //
-// Publi24 has NO seller-type flag (agents post as individuals), so an ad is
-// kept only when its text reads like an owner's ("proprietar", "persoană
-// fizică", "fără comision"…) and has no agency wording. Precision over
-// recall: ambiguous ads are skipped.
+// Private sellers only: category pages are requested with ?commercial=false
+// (Publi24's own "Persoane" filter — company accounts, i.e. agencies, are
+// left out; their ad pages carry seller @type "Organization", private ones
+// "Person"). Ads whose text still reads like an agency's are dropped too, and
+// the recheck retires already-imported ads whose seller is an Organization.
 
 const BASE = 'https://www.publi24.ro';
 const CATEGORIES = [
@@ -116,14 +117,14 @@ export default {
       out.push(...await pageUntilKnown({
         source: 'publi24', known, maxPages, log, label: cat.path,
         fetchPageAds: async (page) => {
-          const url = `${BASE}/anunturi/imobiliare/${cat.path}/${page > 1 ? `?pag=${page}` : ''}`;
+          const url = `${BASE}/anunturi/imobiliare/${cat.path}/?commercial=false${page > 1 ? `&pag=${page}` : ''}`;
           const { html, status } = await fetchPage(url, { delayMs, looksReal: (h) => h.includes('"ItemList"') });
           if (status !== 200) return null;
           const items = itemList(html);
           if (!items) throw new Error(`Publi24 ${cat.path}: no ItemList parsed (page structure changed?)`);
           const cards = cardDetails(html);
           const listings = items
-            .filter((it) => looksLikeOwner(`${decodeEntities(it.name)} ${decodeEntities(it.description)}`))
+            .filter((it) => !looksLikeAgency(`${decodeEntities(it.name)} ${decodeEntities(it.description)}`))
             .map((it) => toSnapshot(it, cat, cards.get(new URL(it.url, `${BASE}/`).pathname)));
           return { ids: items.map((it) => deriveExternalId(new URL(it.url, `${BASE}/`).href)), listings };
         },
@@ -135,6 +136,8 @@ export default {
   recheckVerdict({ status, html, finalUrl }) {
     if (status === 404 || status === 410) return 'gone';
     if (finalUrl && !/\/anunt\//.test(finalUrl)) return 'gone';
+    // A company account's ad (imported before the commercial=false filter).
+    if (/"seller"\s*:\s*\{\s*"@type"\s*:\s*"Organization"/.test(html || '')) return 'gone';
     if (/anun[tț]ul\s+(?:nu\s+mai\s+este|a\s+fost)\s+(?:activ|disponibil|dezactivat|șters|sters|expirat)/i.test(html)) return 'gone';
     return /application\/ld\+json/.test(html) ? 'alive' : null;
   },
