@@ -6,7 +6,7 @@
 // extension capture of the same ad land on ONE prospect. Don't change it
 // without changing the extension.
 export function deriveExternalId(url) {
-  const clean = String(url).split('?')[0].replace(/\/$/, '');
+  const clean = String(url).split(/[?#]/)[0].replace(/\/$/, '');
   const idSuffix = clean.match(/-ID([A-Za-z0-9]+)(?:\.html)?$/i);
   if (idSuffix) return idSuffix[1];
   const segments = clean.split('/').filter(Boolean);

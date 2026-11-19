@@ -86,7 +86,7 @@ function findAccommodationNode(nodes) {
 }
 
 function deriveExternalId(url) {
-  const clean = url.split('?')[0].replace(/\/$/, '');
+  const clean = url.split(/[?#]/)[0].replace(/\/$/, '');
   const trailingDigits = clean.match(/-(\d{6,})$/);
   if (trailingDigits) return trailingDigits[1];
   const segments = clean.split('/').filter(Boolean);
